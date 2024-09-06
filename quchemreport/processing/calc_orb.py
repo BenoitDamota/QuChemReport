@@ -1,28 +1,25 @@
-#! /usr/bin/env python2.7
+#! /usr/bin/env python3
 ## -*- encoding: utf-8 -*-
-
-
 
 ## Functions for calculating molecular orbitals and electron density differences.
 
-from quchemreport.utils.units import A_to_a0, ea0_to_D, pm_to_a0, eV_to_Eh
+from quchemreport.utils.units import A_to_a0, ea0_to_D, pm_to_a0, Eh_to_eV, eA_to_D
+from quchemreport.utils.parameters import obk_step
 from orbkit import core
 import numpy as np
 
 ## Patched version of orbkit.read to read a json
 from quchemreport.processing import json2orbkit
-#from sys import exit
-
 
 ## Get grid parameters and initialize grid
-def _init_ORB_grid(data, grid_par=-6, over_s=7):
+def _init_ORB_grid(data, grid_step=obk_step, over_s=5):
     u"""Initializes ORBKIT's grid and returns necessary data for visualization.
 
     **Parameters:**
       data : dict
     QCinfo instance representing the molecule.
-      grid_par : int
-    Parameter controlling grid. If positive or zero, it specifies number of points; otherwise it specifies the resolution in inverse atomic units.
+      grid_step : float
+    Parameter controlling grid voxel size in atomic units on one dimension. Cubic voxels are used
       over_s : int|float
     Oversizing, to be tuned
 
@@ -35,19 +32,13 @@ def _init_ORB_grid(data, grid_par=-6, over_s=7):
 
     ## Reinitialization of the grid
     grid.is_initialized=False
-    
+
     ## Spacing/Number of points
-    if grid_par > 0:
-        grid.N_ = [grid_par]*3
-    elif grid_par == 0:
-        grid.N_ = [80]*3
-    else:
-        grid.delta_ = [1.0/(-grid_par)]*3
-    
-    grid.max_ = np.amax(data.geo_spec, axis=0) + over_s
-    grid.min_ = np.amin(data.geo_spec, axis=0) - over_s
-    
-    grid.adjust_to_geo(data,extend=over_s,step=grid.delta_[0])
+    grid.delta_ = [grid_step]*3
+
+    grid.max_ = np.around(np.amax(data.geo_spec, axis=0) + over_s)
+    grid.min_ = np.around(np.amin(data.geo_spec, axis=0) - over_s)
+
     grid.init(force=True)
 
     ## The meshgrid MUST be generated in this manner,
@@ -55,40 +46,17 @@ def _init_ORB_grid(data, grid_par=-6, over_s=7):
     ## which uses numpy.arange to generate its grid
     ## (i.e. start:stop+step:step)
     X, Y, Z = np.mgrid[grid.min_[0] : grid.max_[0] + grid.delta_[0] : grid.delta_[0],
-                           grid.min_[1] : grid.max_[1] + grid.delta_[1] : grid.delta_[1],
+                       grid.min_[1] : grid.max_[1] + grid.delta_[1] : grid.delta_[1],
                            grid.min_[2] : grid.max_[2] + grid.delta_[2] : grid.delta_[2]]
+
     ## NOTICE: numpy.arange does not return consistent results if step is a float,
     ## specifically if (stop - start)/step overflows, resulting in
     ## arange(start, stop, step)[-1] > stop
 
     return X, Y, Z
 
-
-
-def _alt_init_ORB_grid(data, N, D):
-    from orbkit import grid
-
-    grid.N_ = np.array(N)
-    grid.delta_ = np.array(D)
-
-    T = grid.N_*grid.delta_
-    P = np.mean(data.geo_spec, axis=0)
-
-    grid.min_ = P - T/2
-    grid.max_ = P + T/2
-
-    grid.init()
-
-    X, Y, Z = np.mgrid[grid.min_[0] : grid.max_[0] + grid.delta_[0] : grid.delta_[0],
-                           grid.min_[1] : grid.max_[1] + grid.delta_[1] : grid.delta_[1],
-                           grid.min_[2] : grid.max_[2] + grid.delta_[2] : grid.delta_[2]]
-
-    return X, Y, Z
-
-
-
 ## Calculations
-def MO(j_data, MO_list, grid_par=-6):
+def MO(j_data, MO_list, spin="none", grid_step=obk_step, nproc=4):
     u"""Calculates the voxels representing the requested molecular orbitals of a molecule.
 
     ** Parameters **
@@ -101,7 +69,7 @@ def MO(j_data, MO_list, grid_par=-6):
         - keywords (e.g. "homo", "lumo")
         - ranges (e.g. "homo-1:lumo+2")
         - symmetries (e.g. "5.A")
-      grid_par : int, optional
+      grid_step : int, optional
     Governs the grid to be used for the voxels.
       - If positive, it indicates the number of points in all 3 dimensions.
       - If zero, it indicates the default number of points (80).
@@ -116,19 +84,40 @@ def MO(j_data, MO_list, grid_par=-6):
 
     ## Prepare data for ORBKIT
     qc = json2orbkit.convert_json(j_data, all_mo=True)
-    X, Y, Z = _init_ORB_grid(qc, grid_par=grid_par)
+    X, Y, Z = _init_ORB_grid(qc, grid_step=grid_step)
 
     ## Get list of orbitals
-    qc.mo_spec = json2orbkit.mo_select(qc.mo_spec, MO_list)["mo_spec"]
+    ## In the 1.1 version of orbkit, for unrestricted calculations, both alpha and beta orbitals are mixed in the same array !
+    if spin == "none":
+        qc.mo_spec = qc.mo_spec.select(MO_list)
+    elif spin == "alpha":
+        # get correct orbkit index for spinorbital. In fact for restricted calculations alpha_index will work and beta_index will always be zero.
+        print("List of selected alpha orbitals:", MO_list)
+        # Use  orbkit sort function in order to force the MO to be sorted by energy before getting the OM indices. 
+        qc.mo_spec.sort_by_energy()
+        MO_list_alpha = [qc.mo_spec.alpha_index[i] for i in MO_list] # seems to get a wrong answer. And orbkit seems to reorder the orbitals  during process !
+        print('orbkit MO list', MO_list_alpha)
+        qc.mo_spec = qc.mo_spec.select(MO_list_alpha)
+    elif spin == "beta":
+        # get correct orbkit index for spinorbital
+        print("List of selected beta orbitals:", MO_list)
+        qc.mo_spec.sort_by_energy()
+        MO_list_beta = [qc.mo_spec.beta_index[i] for i in MO_list]
+        qc.mo_spec = qc.mo_spec.select(MO_list_beta)
+    else:
+        print("Unknown spin detected. Treated as a restricted calculation!")
+        qc.mo_spec = qc.mo_spec.select(MO_list)
+        
+    
 
     ## Calculate
-    out = core.rho_compute(qc, calc_mo=True, numproc=4)
+    out = core.rho_compute(qc, calc_mo=True, numproc=nproc)
 
     return out, X, Y, Z
 
 
 
-def _density_difference_MOs(transitions):
+def _density_difference_MOs(et_transitions):
     u"""Determines the molecular orbitals involved in electron transitions.
 
     ** Parameters **
@@ -146,21 +135,50 @@ def _density_difference_MOs(transitions):
     A translation dictionary mapping the molecular orbitals to indices.
     """
 
+    # For restricted, there is only alpha MOs. 
+    # Cclib excited transition format : The singly-excited configurations is a list (for each electronic transition from the reference ground state) of lists (for each singly-excited configuration) with three members each: 
+    #a tuple (moindex, alpha/beta), which indicates the MO where the transition begins
+    #a tuple (moindex, alpha/beta), which indicates the MO where the transition ends
+    #a float (which can be negative), the coefficient of this singly-excited configuration
+    #In these tuples, the value of alpha/beta is 0 or 1, respectively. For a restricted calculation, this value is always 0, although some programs (GAMESS) sometimes print coefficients for both alpha and beta electrons.
+    #The excitation coefficient is always converted to its unnormalized value by cclib - so the sum of the squared coefficients of all alpha and beta excitations should be unity. It is important to keep in mind, however, that only the square of the excitation coefficient has a physical meaning, and its sign depends on the numerical procedures used by each program.
+
+    # Separate alpha and beta orbitals    
+    MOs_alpha = []
+    MOs_beta = []
+
     ## Get all MOs involved in transitions
-    MO_list = [STT[0] for T in transitions for ST in T for STT in ST[:2]]
-    # Get all unique MO involved
-    MO_set = set(MO_list)
-    ## The dictionary is needed because the MO numbers do not correspond
-    ## to their indices in the output of rho_compute, and we can only access
-    ## them through indices (assuming ORBKIT conserves the order of the MO
-    ## numbers in qc.mo_spec)
-    tab = dict([(MO, i) for i, MO in enumerate(MO_set)])
+    for n_t, transitions in enumerate(et_transitions):
+        for n_st, subtrans in enumerate(et_transitions[n_t]):
+            # seperate alpha and beta orbitals
+            # Starting orbitals
+            if subtrans[0][1] == 0:
+                MOs_alpha.append(subtrans[0][0])
+            elif subtrans[0][1] == 1:
+                MOs_beta.append(subtrans[0][0])
+            else :
+                print("Unrecognised spin in TD transition")
+                # treat by default as alpha orbital
+                MOs_alpha.append(subtrans[0][0])
+            # Ending orbitals
+            if subtrans[1][1] == 0:
+                MOs_alpha.append(subtrans[1][0])
+            elif subtrans[1][1] == 1:
+                MOs_beta.append(subtrans[1][0])
+            else :
+                print("Unrecognised spin in TD transition")
+                # treat by default as alpha orbital
+                MOs_alpha.append(subtrans[1][0])
 
-    return MO_set, tab
+    # Get all unique MO involved   
+    MOs_alpha = list(set(MOs_alpha))
+    MOs_alpha.sort()
+    MOs_beta = list(set(MOs_beta))
+    MOs_beta.sort()
+   
+    return MOs_alpha, MOs_beta
 
-
-
-def TD(j_data, transitions, grid_par=-6):
+def TD(args, j_data, transitions, grid_step=obk_step, nproc=4):
     u"""Calculates diverse data on the requested transitions of a molecule.
 
     ** Parameters **
@@ -168,7 +186,7 @@ def TD(j_data, transitions, grid_par=-6):
     Data on the molecule, as deserialized from the scanlog format.
       transitions : list
     A list of integers designating the transitions to consider (starting from 0)
-      grid_par : int, optional
+      grid_step : int, optional
     Governs the grid to be used for voxel data.
       - If positive, it indicates the number of points in all 3 dimensions.
       - If zero, it indicates the default number of points (80).
@@ -183,19 +201,26 @@ def TD(j_data, transitions, grid_par=-6):
        - The electron displacement, in picometres
        - The transferred charge
        - The dipole moment, in Debye
-       - The positions of the positive and negative barycenters, respectively, in A.U.
-
-      X, Y, Z : numpy.ndarray
+       - The positions of the positive and negative barycenters, respectively, in atomic coordinates positions (usually angstrom)
+     - sequences of voxels representing the overlap between the initial and final MOs;
+     - A tuple containing:
+       - The positions of the positive and negative barycenters, respectively, in atomic coordinates positions (usually angstrom)
+     X, Y, Z : numpy.ndarray
     Meshgrids (as generated by numpy.mgrid), required for placing the voxels contained in out.
     """
+    verbose = args['verbose']
 
     ## To save time, the calculation is done in two phases:
 
     ## 1. Get all MOs involved in transitions and calculate them once
-    MO_set, tab = _density_difference_MOs(transitions)
-
-    MOs, X, Y, Z = MO(j_data, [str(Orb_index + 1) for Orb_index in MO_set], grid_par=grid_par)
-
+    MO_list_alpha, MO_list_beta = _density_difference_MOs(transitions)
+    
+    # Treat alpha orbitals
+    MOs_alpha, X, Y, Z = MO(j_data, MO_list_alpha, spin="alpha", grid_step=grid_step, nproc=nproc)
+    # Treat beta orbitals 
+    if len(MO_list_beta) > 0:
+        MOs_beta, X, Y, Z = MO(j_data, MO_list_beta, spin="beta", grid_step=grid_step, nproc=nproc)
+    
     dx, dy, dz = (X[10,0,0] - X[9,0,0]), (Y[0,10,0] - Y[0,9,0]), (Z[0,0,10] - Z[0,0,9])
     d3r = dx*dy*dz
     print("Element of volume :", d3r)
@@ -203,42 +228,92 @@ def TD(j_data, transitions, grid_par=-6):
     ## 2. Combine MOs according to info in `et_transitions`
     out = []
     for i, T in enumerate(transitions):
-        vox_data = np.zeros(MOs[0].shape)
+        vox_data = np.zeros(MOs_alpha[0].shape)
+        vox_Oif = np.zeros(MOs_alpha[0].shape)      
         tozer = 0
-        for j, ST in enumerate(T):
-            print("Calculating transition {}.{}".format(i, j))
+        for j, subtrans in enumerate(T):
+            #print("Processing Subtransition: ", subtrans)
+            if verbose :
+                print("Calculating transition {}.{}".format(i, j))
+            elif i==0 and j==0:
+                print("Calculating transitions...")
             ## Dp_i = S_j(C_ij**2*(MO2_ij**2 - MO1_ij**2))
-            MO_end, MO_start = MOs[tab[ST[1][0]]], MOs[tab[ST[0][0]]]
+            #print("Starting MO is ", ST[0][0] , "and index in MOs after discretization " ,  MOs_alpha.index(ST[0][0]))
+            #print("Ending MO is ", ST[1][0] , "and index in MOs after discretization " ,  MOs_alpha.index(ST[1][0]))
+            # Test spin of starting  orbital
+            if subtrans[0][1] == 0:
+                # alpha orbital
+                MO_start = MOs_alpha[MO_list_alpha.index(subtrans[0][0])]
+            elif subtrans[0][1] == 1:
+                MO_start = MOs_beta[MO_list_beta.index(subtrans[0][0])]
+            else :
+                print("Unrecognised spin in TD transition")
+                # treat by default as alpha orbital
+                MO_start = MOs_alpha[MO_list_alpha.index(subtrans[0][0])]
+            # Test spin of ending orbital
+            if subtrans[1][1] == 0:
+                # alpha orbital
+                MO_end = MOs_alpha[MO_list_alpha.index(subtrans[1][0])]
+            elif subtrans[1][1] == 1:
+                MO_end = MOs_beta[MO_list_beta.index(subtrans[1][0])]
+            else :
+                print("Unrecognised spin in TD transition")
+                # treat by default as alpha orbital
+                MO_end = MOs_alpha[MO_list_alpha.index(subtrans[1][0])]
             rho_end, rho_start = np.square(MO_end), np.square(MO_start)
-            vox_data += ST[2]**2*(rho_end - rho_start)
+            #print("Coefficient is " , ST[2])
+            vox_data += subtrans[2]**2*(rho_end - rho_start)
+
+            ## For rationale of Electric dipole. 
+            # Let's keep the voxel data of overlap of S_j(C_ij**2*(MO_init *MO_final))
+            vox_Oif += subtrans[2]**2*(MO_start*MO_end)*d3r
 
             ## Tozer_i = S_j(C_ij**2*(|MO2_ij|*|MO1_ij|))
             abs_MO_end, abs_MO_start = np.abs(MO_end), np.abs(MO_start)
-            tozer += ST[2]**2*np.sum(abs_MO_end*abs_MO_start)*d3r
+            tozer += subtrans[2]**2*np.sum(abs_MO_end*abs_MO_start)*d3r
 
+        # Separate positive P and negative voxels N and their respective positions
         P_i, N_i = vox_data > 0.0, vox_data < 0.0
-
+        # positive Voxels DDp (negative DDn) in Mayavi form 
         DDp, Xp, Yp, Zp = vox_data[P_i], X[P_i], Y[P_i], Z[P_i]
         DDn, Xn, Yn, Zn = vox_data[N_i], X[N_i], Y[N_i], Z[N_i]
+        # Charge = sum of positive Voxels Qctp (negative Qctn) : quantity of charge transfer in e
         Qctp, Qctn = np.sum(DDp)*d3r, np.sum(DDn)*d3r
+        # Calculation of the barycenter positions x = Sum(q_i*x_i)/Q. Mayavi center the voxel position. dx/2.0 realign with atomic coordinates
+        # Beware if atomic positions in Angstrom.  
         Pp = np.array([np.sum(DDp*Xp)*d3r/Qctp + dx/2.0, np.sum(DDp*Yp)*d3r/Qctp + dy/2.0, np.sum(DDp*Zp)*d3r/Qctp + dz/2.0])
         Pn = np.array([np.sum(DDn*Xn)*d3r/Qctn + dx/2.0, np.sum(DDn*Yn)*d3r/Qctn + dy/2.0, np.sum(DDn*Zn)*d3r/Qctn + dz/2.0])
+        # Charge transfer dipole norm in angstrom  
         D = np.sqrt(np.sum(np.square(Pp - Pn)))
-        Mu = D*Qctp/ea0_to_D
-
-        out += [(vox_data, tozer, (D*pm_to_a0, Qctp, Mu, Pp, Pn))]
+        # Charge transfer dipole moment in Debye = 0.2081943 e.A  
+        Mu = D*Qctp*eA_to_D
+        
+        # transition phase dipole based on the overlap between intial and final wavefunctions
+        # Separate positive P and negative overlap voxels N and their respective positions
+        P_o, N_o = vox_Oif > 0.0, vox_Oif < 0.0
+        # positive Voxels Op (negative On) in Mayavi form 
+        Op, Xp, Yp, Zp = vox_Oif[P_o], X[P_o], Y[P_o], Z[P_o]
+        On, Xn, Yn, Zn = vox_Oif[N_o], X[N_o], Y[N_o], Z[N_o]
+        # Charge = sum of positive Voxels Qop (negative Qon) : quantity of overlap
+        Qop, Qon = np.sum(Op)*d3r, np.sum(On)*d3r
+        # Calculation of the barycenter positions x = Sum(q_i*x_i)/Q. Mayavi center the voxel position. dx/2.0 realign with atomic coordinates
+        # Beware if atomic positions in Angstrom.  
+        POp = np.array([np.sum(Op*Xp)*d3r/Qop + dx/2.0, np.sum(Op*Yp)*d3r/Qop + dy/2.0, np.sum(Op*Zp)*d3r/Qop + dz/2.0])
+        POn = np.array([np.sum(On*Xn)*d3r/Qon + dx/2.0, np.sum(On*Yn)*d3r/Qon + dy/2.0, np.sum(On*Zn)*d3r/Qon + dz/2.0])
+              
+        out += [(vox_data, tozer, (D*pm_to_a0, Qctp, Mu, Pp, Pn), vox_Oif, (POp, POn) )]
 
     return out, X, Y, Z
 
 
 
-def Potential(j_data, grid_par=-6):
+def Potential(j_data, grid_step=obk_step, nproc=4):
     u"""Calculates the electric potential difference for the molecule.
 
     ** Parameters **
       j_data : dict
     Data on the molecule, as deserialized from the scanlog format.
-      grid_par : int, optional
+      grid_step : int, optional
     Governs the grid to be used for voxel data.
       - If positive, it indicates the number of points in all 3 dimensions.
       - If zero, it indicates the default number of points (80).
@@ -255,20 +330,22 @@ def Potential(j_data, grid_par=-6):
 
     qc = json2orbkit.convert_json(j_data)
 
-    X, Y, Z = _init_ORB_grid(qc, grid_par=grid_par)
-
+    X, Y, Z = _init_ORB_grid(qc, grid_step=grid_step)
     dx, dy, dz = (X[10,0,0] - X[9,0,0]), (Y[0,10,0] - Y[0,9,0]), (Z[0,0,10] - Z[0,0,9])
     d3r = dx*dy*dz
 
-    rho = core.rho_compute(qc, numproc=4)
-    print("Rho : ", np.sum(rho)*d3r, "(", np.min(rho)," ... ", np.max(rho),")")
-    print("d : ", dx, dy, dz)
-    print("P0 : ", X[0,0,0], Y[0,0,0], Z[0,0,0])
-    print("P1 : ", X[-1,0,0], Y[0,-1,0], Z[0,0,-1])
+    rho = core.rho_compute(qc, numproc=nproc)
+    # Test renormalization of rho to account for disctretization errors 
+    # Get expected number of electron
+    nb_e = np.sum(j_data['molecule']['atoms_Z'])-j_data['molecule']['charge']
+    rho_n = (nb_e * rho) / (np.sum(rho)*d3r)
+    rho = rho_n
+    
     P = np.array([X, Y, Z])
 
     ## The potential can be separated into two terms
     ## V_n, the contribution from nuclear charges (positive)
+    # Sum over all nucleus i of Zi (atomic number) / the distance to the nucleus. 
     V_n = np.zeros(rho.shape)
     for i in range(len(qc.geo_spec)):
         ## This currently works by:
@@ -276,56 +353,64 @@ def Potential(j_data, grid_par=-6):
         ## 2. calculating the norm accross the three dimensions
         ## 3. propagating the meshgrid shape to the charge
         R = np.linalg.norm(P - qc.geo_spec[i].reshape((3,1,1,1)), axis=0)
-        R[R < 0.005] = np.inf
+        R[R < 0.0005] = np.inf
         N_i = float(qc.geo_info[i,-1])/R
         V_n += N_i
-        print("V_n (", qc.geo_info[i,0], qc.geo_info[i,-1], ") : (", np.min(N_i), ", ", np.max(N_i), ") (", np.argwhere(N_i > 250).size, ")")
-
-
-    TIx, TIy, TIz = rho.shape
-    Tx, Ty, Tz = X[-1,0,0] - X[0,0,0], Y[0,-1,0] - Y[0,0,0], Z[0,0,-1] - Z[0,0,0]
-
 
     ## V_r, the contribution from the electron density (negative)
+    #  Integral of density x the element of volume / the distance to the electronic density voxel
     ## To avoid calculating the full volume integral,
     ## we consider rho as a kernel and apply it to
-    ## the grid of inverse distances as though it
-    ## were an image
+    ## the grid of inverse distances as though it were an image
 
     ## 1. Accumulate local potential
     V_e = np.ones(rho.shape)*rho
 
     ## Reverse rho, so that it is traversed in the
     ## same direction as the image matrix
-    rho_r = rho[::-1,::-1,::-1].copy()
+    #rho_r = rho[::-1,::-1,::-1].copy()
 
-    ## 2. Extend grid
-    X_, Y_, Z_ = np.mgrid[ dx*(1 - TIx) : dx*TIx : dx,
-                           dy*(1 - TIy) : dy*TIy : dy,
-                           dz*(1 - TIz) : dz*TIz : dz ]
-    print("Potential shape :", P.shape)
+    ## 2. Extension of the grid needed for convolution to a size of 2X-1, 2Y-1, 2Z-1 
+    # You can impose the number of voxels with mgrid if the last argument is a complex
+    # It is a solution chosen due to missing voxels on one direction in some cases
+    TIx, TIy, TIz = rho.shape
+    X_, Y_, Z_ = np.mgrid[ np.around(dx*(1 - TIx)) : np.around(dx*TIx): np.complex(TIx*2-1),
+                           np.around(dy*(1 - TIy)) : np.around(dy*TIy) : np.complex(TIy*2-1),
+                           np.around(dz*(1 - TIz)) : np.around(dz*TIz) : np.complex(TIz*2-1) ]
+#    from orbkit import grid
+#    X_, Y_, Z_ = np.mgrid[grid.min_[0] *2 : grid.max_[0] *2 : dx, 
+#                          grid.min_[1] *2 : grid.max_[1] *2 : dy, 
+#                          grid.min_[2] *2 : grid.max_[2] *2 : dz]
+    
 
     ## 3. Calculate distance grid
     D = np.linalg.norm(np.array([0,0,0]).reshape((3,1,1,1)) - np.array([X_,Y_,Z_]), axis=0)
     D[TIx - 1, TIy - 1, TIz - 1] = np.inf
     R = 1/D
+    #print("R shape", R.shape)
 
     ## 4. Convolute
-    for i in xrange(TIx):
-        ie = i + TIx
-        for j in xrange(TIy):
-            je = j + TIy
-            for k in xrange(TIz):
-                V_e[i,j,k] += (rho_r * R[i:ie, j:je, k:k + TIz]).sum()
+    ## Classic approach. 
+#    for i in range(TIx):
+#        ie = i + TIx
+#        for j in range(TIy):
+#            je = j + TIy
+#            for k in range(TIz):
+#                V_e_bis[i,j,k] += (rho_r * R[i:ie, j:je, k:k + TIz]).sum()
 
-    #from scipy import signal as sg
-    #V_e += sg.fftconvolve(R, rho, "valid")
+    # Tested with H2O to produce the same array as fftconvolve wich is MUCH MUCH faster
+    # np.sum(diff_V) / np.sum(V_e_bis) = -1.30e-16
+    # np.max(diff_V) = 0.0009765625
+    # np.mean(diff_V) = -1.3840765855904132e-08
 
+    from scipy import signal as sg
+    V_e += sg.fftconvolve(R, rho, "valid")
     V_e *= d3r
+    
 
     return rho, V_n - V_e, X, Y, Z
 
-def Fukui(j_data_opt, j_data_sp, label=None, grid_par=-6):
+def Fukui(j_data_opt, j_data_sp, label=None, grid_step=obk_step, nproc=4):
     u"""Calculates the density differences/Fukui functions of the molecule.
 
     ** Parameters **
@@ -333,7 +418,7 @@ def Fukui(j_data_opt, j_data_sp, label=None, grid_par=-6):
     Data on the optimized molecule, as deserialized from the scanlog format.
           j_data_sp : dict
         Data on the optimized molecule, as deserialized from the scanlog format.
-      grid_par : int, optional
+      grid_step : int, optional
     Governs the grid to be used for voxel data.
       - If positive, it indicates the number of points in all 3 dimensions.
       - If zero, it indicates the default number of points (80).
@@ -347,65 +432,61 @@ def Fukui(j_data_opt, j_data_sp, label=None, grid_par=-6):
            X, Y, Z : numpy.ndarray
          Meshgrids (as generated by numpy.mgrid), required for placing the voxels contained in rho and V.
         """
- 
+
     qc_opt = json2orbkit.convert_json(j_data_opt)
     qc_sp = json2orbkit.convert_json(j_data_sp)
- ## Get all MOs involved in transitions
-#    MO_list = [STT[0] for T in transitions for ST in T for STT in ST[:2]]
-    # Get all unique MO involved
-#    MO_set = set(MO_list)
-    ## The dictionary is needed because the MO numbers do not correspond
-    ## to their indices in the output of rho_compute, and we can only access
-    ## them through indices (assuming ORBKIT conserves the order of the MO
-    ## numbers in qc.mo_spec)
-#    tab = dict([(MO, i) for i, MO in enumerate(MO_set)])
-    X, Y, Z = _init_ORB_grid(qc_opt, grid_par=grid_par)
- 
+
+    X, Y, Z = _init_ORB_grid(qc_opt, grid_step=grid_step)
+
     dx, dy, dz = (X[10,0,0] - X[9,0,0]), (Y[0,10,0] - Y[0,9,0]), (Z[0,0,10] - Z[0,0,9])
     d3r = dx*dy*dz
- 
-    rho_opt = core.rho_compute(qc_opt, numproc=4)
-    rho_sp = core.rho_compute(qc_sp, numproc=4)
 
-    ## Calculation of the delta rho
-    if j_data_sp["molecule"]["charge"] < 0 :
+    rho_opt = core.rho_compute(qc_opt, numproc=nproc)
+    rho_sp = core.rho_compute(qc_sp, numproc=nproc)
+
+    charge_diff = j_data_opt["molecule"]["charge"] - j_data_sp["molecule"]["charge"]
+    print ("OPT and SP charges and diff", j_data_opt["molecule"]["charge"] , j_data_sp["molecule"]["charge"], charge_diff )
+    ## Calculation of the delta rho  
+    ## For f+ we should have density of anion - density of ground state (charge_diff = 0 --1)
+    ## For f- we should have density of ground state - density of cation (charge_diff = 0 -+1)   
+    if charge_diff > 0 :
         delta_rho = np.subtract(rho_sp, rho_opt)
-    elif  j_data_sp["molecule"]["charge"] > 0 :
+    elif  charge_diff < 0 :
         delta_rho = np.subtract(rho_opt, rho_sp)
-            
+
 
     print("Rho : ", np.sum(rho_opt)*d3r, "(", np.min(rho_opt)," ... ", np.max(rho_opt),")")
     print("d : ", dx, dy, dz)
     print("P0 : ", X[0,0,0], Y[0,0,0], Z[0,0,0])
     print("P1 : ", X[-1,0,0], Y[0,-1,0], Z[0,0,-1])
     P = np.array([X, Y, Z])
-         
+
     return delta_rho, X, Y, Z
 
 
-def Fdual(j_data_opt, j_data_spplus, j_data_spminus, grid_par=-6):
-      
-    qc_opt = json2orbkit.convert_json(j_data_opt)
-    qc_spplus = json2orbkit.convert_json(j_data_spplus)
-    qc_spminus = json2orbkit.convert_json(j_data_spminus)
+def Fdual(j_data_opt, delta_rho_plus, delta_rho_minus, grid_step=obk_step):
 
-    X, Y, Z = _init_ORB_grid(qc_opt, grid_par=grid_par)
+    qc_opt = json2orbkit.convert_json(j_data_opt)
+    #qc_spplus = json2orbkit.convert_json(j_data_spplus)
+    #qc_spminus = json2orbkit.convert_json(j_data_spminus)
+
+    X, Y, Z = _init_ORB_grid(qc_opt, grid_step=grid_step)
 
     dx, dy, dz = (X[10,0,0] - X[9,0,0]), (Y[0,10,0] - Y[0,9,0]), (Z[0,0,10] - Z[0,0,9])
     d3r = dx*dy*dz
 
-    rho_opt = core.rho_compute(qc_opt, numproc=4)
-    rho_spplus = core.rho_compute(qc_spplus, numproc=4)
-    rho_spminus = core.rho_compute(qc_spminus, numproc=4)
+    #rho_opt = core.rho_compute(qc_opt, numproc=4)
+    #rho_spplus = core.rho_compute(qc_spplus, numproc=4)
+    #rho_spminus = core.rho_compute(qc_spminus, numproc=4)
 
-    delta_rho_plus = np.subtract(rho_spplus, rho_opt)
-    delta_rho_minus = np.subtract(rho_opt, rho_spminus)
+    #delta_rho_plus = np.subtract(rho_spplus, rho_opt)
+    #delta_rho_minus = np.subtract(rho_opt, rho_spminus)
     delta_rho_2 =  np.subtract(delta_rho_plus, delta_rho_minus)
 
-    print("Rho : ", np.sum(rho_opt)*d3r, "(", np.min(rho_opt)," ... ", np.max(rho_opt),")")
-    print("d : ", dx, dy, dz)
-    print("P0 : ", X[0,0,0], Y[0,0,0], Z[0,0,0])
-    print("P1 : ", X[-1,0,0], Y[0,-1,0], Z[0,0,-1])
+    #print("Rho : ", np.sum(rho_opt)*d3r, "(", np.min(rho_opt)," ... ", np.max(rho_opt),")")
+    #print("d : ", dx, dy, dz)
+    #print("P0 : ", X[0,0,0], Y[0,0,0], Z[0,0,0])
+    #print("P1 : ", X[-1,0,0], Y[0,-1,0], Z[0,0,-1])
     P = np.array([X, Y, Z])
 
     return delta_rho_2, X, Y, Z 
@@ -415,35 +496,41 @@ def CDFT_plus_Indices(j_data_opt, j_data_spplus):
     Eref = j_data_opt["results"]["wavefunction"]["total_molecular_energy"]
     Eplus = j_data_spplus["results"]["wavefunction"]["total_molecular_energy"]
 
-    A = (Eref-Eplus)*eV_to_Eh
+    A = (Eref-Eplus) / Eh_to_eV
 
     OPT_charges = np.array(j_data_opt["results"]["wavefunction"]["Mulliken_partial_charges"])
     SPplus_charges = np.array(j_data_spplus["results"]["wavefunction"]["Mulliken_partial_charges"])
     fplus_lambda_mulliken = np.subtract(OPT_charges, SPplus_charges)
-    
-    OPT_charges = np.array(j_data_opt["results"]["wavefunction"]["Hirshfeld_partial_charges"])
-    SPplus_charges = np.array(j_data_spplus["results"]["wavefunction"]["Hirshfeld_partial_charges"])
+
+    try : OPT_charges = np.array(j_data_opt["results"]["wavefunction"]["Hirshfeld_partial_charges"])
+    except KeyError :  OPT_charges = []
+    try : SPplus_charges = np.array(j_data_spplus["results"]["wavefunction"]["Hirshfeld_partial_charges"])
+    except KeyError :  SPplus_charges = []
     fplus_lambda_hirshfeld = np.subtract(OPT_charges, SPplus_charges)
 
     return A, fplus_lambda_mulliken, fplus_lambda_hirshfeld
-    
+    #return A, fplus_lambda_mulliken
+
 
 def CDFT_minus_Indices(j_data_opt, j_data_spminus):
     Eref = j_data_opt["results"]["wavefunction"]["total_molecular_energy"]
     Eminus = j_data_spminus["results"]["wavefunction"]["total_molecular_energy"]
-    
-    I = (Eminus-Eref)*eV_to_Eh
+
+    I = (Eminus-Eref) / Eh_to_eV
 
     OPT_charges = np.array(j_data_opt["results"]["wavefunction"]["Mulliken_partial_charges"])
     SPminus_charges = np.array(j_data_spminus["results"]["wavefunction"]["Mulliken_partial_charges"])
-    fminus_lambda_mulliken = np.subtract(OPT_charges, SPminus_charges)
+    fminus_lambda_mulliken = np.subtract(SPminus_charges, OPT_charges)
 
-    OPT_charges = np.array(j_data_opt["results"]["wavefunction"]["Hirshfeld_partial_charges"])
-    SPminus_charges = np.array(j_data_spminus["results"]["wavefunction"]["Hirshfeld_partial_charges"])
-    fminus_lambda_hirshfeld = np.subtract(OPT_charges, SPminus_charges)
+    try : OPT_charges = np.array(j_data_opt["results"]["wavefunction"]["Hirshfeld_partial_charges"])
+    except KeyError :  OPT_charges = []
+    try : SPminus_charges = np.array(j_data_spminus["results"]["wavefunction"]["Hirshfeld_partial_charges"])
+    except KeyError :  SPminus_charges = []
+    fminus_lambda_hirshfeld = np.subtract(SPminus_charges, OPT_charges)
 
     return I, fminus_lambda_mulliken, fminus_lambda_hirshfeld
-    
+    #return I, fminus_lambda_mulliken
+
 def CDFT_Indices(j_data_opt, j_data_spplus, j_data_spminus):
 
     """CDFT indices to be calculated :
@@ -459,26 +546,29 @@ def CDFT_Indices(j_data_opt, j_data_spplus, j_data_spminus):
 
     A, fplus_lambda_mulliken, fplus_lambda_hirshfeld = CDFT_plus_Indices(j_data_opt, j_data_spplus)
     I, fminus_lambda_mulliken, fminus_lambda_hirshfeld = CDFT_minus_Indices(j_data_opt, j_data_spminus)
+    #A, fplus_lambda_mulliken = CDFT_plus_Indices(j_data_opt, j_data_spplus)
+    #I, fminus_lambda_mulliken = CDFT_minus_Indices(j_data_opt, j_data_spminus)
 
     Khi = (I+A)/2.
     Eta = I-A
     Omega = Khi*Khi/(2*Eta)
     DeltaN = Khi/Eta
 
- ## Calculations for the condensed fukui and condensed dual descriptor based on Mulliken and Hirshfeld charges 
+    ## Calculations for the condensed fukui and condensed dual descriptor based on Mulliken and Hirshfeld charges 
     fdual_lambda_mulliken = np.subtract(fplus_lambda_mulliken, fminus_lambda_mulliken)
     fdual_lambda_hirshfeld = np.subtract(fplus_lambda_hirshfeld, fminus_lambda_hirshfeld)
 
-    c_Omega_plus_mulliken = np.multiply(Omega, fplus_lambda_mulliken)
-    c_Omega_minus_mulliken = np.multiply(Omega, fminus_lambda_mulliken)
-    c_Omega_dual_mulliken = np.multiply(Omega, fdual_lambda_mulliken)
+    #c_Omega_plus_mulliken = np.multiply(Omega, fplus_lambda_mulliken)
+    #c_Omega_minus_mulliken = np.multiply(Omega, fminus_lambda_mulliken)
+    #c_Omega_dual_mulliken = np.multiply(Omega, fdual_lambda_mulliken)
 
-    c_Omega_plus_hirshfeld = np.multiply(Omega, fplus_lambda_hirshfeld)
-    c_Omega_minus_hirshfeld = np.multiply(Omega, fminus_lambda_hirshfeld)
-    c_Omega_dual_hirshfeld = np.multiply(Omega, fdual_lambda_hirshfeld)
+    #c_Omega_plus_hirshfeld = np.multiply(Omega, fplus_lambda_hirshfeld)
+    #c_Omega_minus_hirshfeld = np.multiply(Omega, fminus_lambda_hirshfeld)
+    #c_Omega_dual_hirshfeld = np.multiply(Omega, fdual_lambda_hirshfeld)
 
-    return A, I, Khi, Eta, Omega, DeltaN, fplus_lambda_mulliken, fminus_lambda_mulliken, fdual_lambda_mulliken, fplus_lambda_hirshfeld, fminus_lambda_hirshfeld, fdual_lambda_hirshfeld, c_Omega_plus_mulliken, c_Omega_minus_mulliken, c_Omega_dual_mulliken, c_Omega_plus_hirshfeld, c_Omega_minus_hirshfeld, c_Omega_dual_hirshfeld
+    #return A, I, Khi, Eta, Omega, DeltaN, fplus_lambda_mulliken, fminus_lambda_mulliken, fdual_lambda_mulliken, fplus_lambda_hirshfeld, fminus_lambda_hirshfeld, fdual_lambda_hirshfeld, c_Omega_plus_mulliken, c_Omega_minus_mulliken, c_Omega_dual_mulliken, c_Omega_plus_hirshfeld, c_Omega_minus_hirshfeld, c_Omega_dual_hirshfeld
 
+    return A, I, Khi, Eta, Omega, DeltaN, fplus_lambda_mulliken, fminus_lambda_mulliken, fdual_lambda_mulliken, fplus_lambda_hirshfeld, fminus_lambda_hirshfeld, fdual_lambda_hirshfeld
 
 
 

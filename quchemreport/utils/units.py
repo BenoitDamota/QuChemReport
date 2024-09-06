@@ -1,21 +1,37 @@
 ## -*- encoding: utf-8 -*-
 
-## All conversion factors are by division
+## Conversion factors 
 
-## eV-Hartree conversion factor
-eV_to_Eh = 27.21138505
+def nm2wnb(x):
+    # x in nanometers, returns the equivalent in wavenumber (cm-1)
+    return 10000000.0 / x
 
-## cm-1-Hartree conversion factor
-cm_1_to_Eh = 219474.6313702
+def wnb2nm(x):
+    # x in wavenumber (cm-1), returns the equivalent in nanometers
+    return 10000000.0 / x
 
-## Ångström-Bohr conversion factor
+## Hartree to eV conversion factor
+Eh_to_eV = 27.21138505
+
+## Hartree to cm-1 conversion factor
+Eh_to_cm_1 = 219474.6313702
+
+## Hartree to Kcal.mol^-1 conversion factor
+Eh_to_Kcal_mol = 627.510
+
+## A.U. to Debye conversion factor
+ea0_to_D = 0.393430307
+
+## eA (electron*Angstrom) to Debye conversion factor
+eA_to_D = 0.2081943
+
+## Angstrom to Bohr conversion factor
 A_to_a0 = 0.52917721092
 
 ## Picometre-Bohr conversion factor
 pm_to_a0 = A_to_a0*100
 
-## A.U. to Debye conversion factor
-ea0_to_D = 0.393430307
+## Nanometers to wavenumber conversion
+nm_to_wnb = 10000000.0
 
-## V to Kcal.mol^-1 conversion factor
-V_to_Kcal_mol = 1/627.51
+

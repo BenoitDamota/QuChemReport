@@ -1,0 +1,58 @@
+# CClib name		CClib framework								Scanlog name		Scanlog framework
+"aonames",               Attribute('atoms', 'orbitals', 'names')				"aonames",              Attribute("comp_details", "general","names")
+"basissetsize",          Attribute('properties', 'orbitals', 'basis number') 			"basissetsize",         Attribute("comp_details", "general","basis number")
+"integrationgrid",       Attribute('properties', 'integration grid')                            "integrationgrid",      Attribute("comp_details", "general","integration grid")
+"coreelectronsperatoms", Attribute('atoms',      'core electrons')                              "coreelectronsperatoms",Attribute("comp_details", "general","core electrons")  
+"anharmonicity",         Attribute('vibrations', 'anharmonicity constants')      (1/cm)  	"anharmonicity",            Attribute("comp_details","freq","anharmonicity constants")
+"temperature",           Attribute('properties', 'temperature')                  (Kelvin)       "temperature",          Attribute("comp_details", "freq",   "temperature")
+"homoindexes",           Attribute('properties', 'orbtials', 'homos')                     	"homoindexes",          Attribute("results",       "wavefunction", "homos")      
+"MOenergies"             Attribute('properties', 'orbitals',  'energies')   (eV)           	"MOenergies",           Attribute("results",       "wavefunction", "energies")
+"MOsym",                 Attribute('properties', 'orbitals'  'molecular orbital symmetry')     "MOsym",   Attribute("results","wavefunction", "molecular orbital symmetry")
+"MOnumber"               Attribute('properties', 'orbitals' 'Molecular orbital number')  	"MOnumber",             Attribute("results",       "wavefunction",  "MO number")
+"NREfromxyz", 		Attribute(nuclear repulsion energy from xyz (data)) 				"NREfromxyz",Attribute("results","geometry","nuclear repulsion energy" )
+"OPT_DONE",              Attribute('optimization','done')                                      "OPT_DONE",                   Attribute("results", "geometry", "done")
+"elements3Dcoordsconverged",Attribute('atoms', 'coords', '3d')                                 "elements3Dcoordsconverged",  Attribute("results", "geometry", "3d")
+"geometricvalues",       Attribute('optimizaztion', 'geometric values')                        "geometricvalues",            Attribute("results", "geometry", "geometric value")
+"totalmolecularenergy",  Attribute('properties', 'energy',         'total') (eV to Hartree)    "totalmolecularenergy",       Attribute("results", "wavefunction", "total")
+"Mullikenpartialcharges",Attribute('properties', 'partial charges','mulliken')                 "Mullikenpartialcharges",     Attribute("results", "wavefuncton", "mulliken")
+"geometrictargets",      Attribute('optimization','geometric targets')                         "geometrictargets",      Attribute("comp_details","geometry" ,"geometric targets")
+"entropy",               Attribute('properties', 'entropy')   (Hartree/particle)               "entropy",                    Attribute("results", "freq", "entropy")
+"enthalpy",              Attribute('properties', 'enthalpy')  (Hartrree/particle)              "enthalpy",                   Attribute("results", "freq", "enthalpy")
+"zeroPointEnergy",       Attribute('properties', "zero point energy")                          "zeroPointEnergy",            Attribute("results", "freq", "zero point energy")
+"electronicThermalEnergy",Attribute('properties','electronic thermal energy')            "electronicthermalEnergy",     Attribute("results", "freq", "electronic thermal energy")
+"vibrationalFreq",        Attribute('vibrations','frequencies')                                "vibrationalFreq",            Attribute("results", "freq",  "frequencies")
+"vibrationalInt",         Attribute('vibrations','intensities', 'IR')                          "vibrationalInt",             Attribute("results", "freq", "IR")
+"vibrationalSym",         Attribute('vibrations', 'vibration', 'symmetry')                      "vibrationalSym",            Attribute("results", "freq", "symmetry")
+"vibrationDisp",          Attribute('vibrations','displacement')                               "vibrationalDisp",            Attribute("results", "freq", "displacement")
+"vibrationalAnharms"      Attribute('vibrations','anharmonicity constants')                 "vibrationalAnharms",         Attribute("results", "freq", " anharmonicity constants")
+"vibrationalRaman",       Attribute('vibrations','intensities, 'Raman')                      "vibrationalRaman",             Attribute("results",  "freq", "Raman")
+"etEnergies",             Attribute('transitions','electronic transitions')                   "etEnergies",      Attribute("results", "excited_states", "electronic transitions")
+"etOscs"                  Attribute('transitions','oscillator strength')                      "etOscs"           Attribute("results", "excited_states", "oscillator strength")
+"etSym"                   Attribute('transitions','symmetry')                                 "etSym"            Attribute("results","excited_states", "symmetry")
+"etRot"                   Attribute('transitions','rotatory strength')                        "etRot"            Attribute("results","excited_states", "rotatory strength")
+"etTransitions"           Attribute('transitions','one excited config')                       "etTransitions"    Attribute("results","excited_states", "one excited config")
+
+#OpenBabel_data
+
+"inchi",                  Attribute("molecule", "inchi")
+"smi",                    Attribute("molecule", "smi")
+"can",                    Attribute("molecule", "can")
+"chirality",              Attribute("molecule", "chirality")
+"monoisotopic_mass",      Attribute("molecule", "monoisotopic_mass")
+"atoms_valence"           Attribute("molecule", "atoms_valence)
+"atom_pairs"              Attribute("molecule", "connectivity","atom_pairs")
+"bond_orders"             Attribute("molecule", "connectivity","bond_orders")
+
+#End OpenBabel_data
+              
+
+"formula",                Attribute('formula')                                                "formula"          Attribute("molecule", "formula")
+"nbAtoms",                Attribute('properties','number of atoms')                           "nbAtoms"          Attribute("molecule", "number of atoms")
+"nbHeavyAtoms",           Attribute('properties','elements', 'heavy atom count')              "nbHeavyAtoms"     Attribute("molecule", "heavy atom count")
+"charge",                 Attribute('properties','charge')                                    "charge"           Attribute("molecule", "charge")
+"multiplicity",           Attribute('properties','multiplicity')                              "multiplicity"     Attribute("molecule", "multiplicity")
+"atomeZ",                 Attribute('atoms', 'elements', 'number')                            "atomeZ"           Attribute("molecule", "number")
+"startingGeometry",       ...
+"startingEnergy",         Attribute('optimizations', 'scf', 'scf energies')  (eV)             "StartingEnergy"   Attribute("molecule", "scf energies") (Hartree)
+"startingNuclearRepulsion" ...
+

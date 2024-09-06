@@ -15,9 +15,11 @@ NumPy
 SciPy
 
 For the parsing process:
+requests
 Openbabel (>= 2.4.1) (apt install openbabel-dev and pip3 install openbabel)
 Cclib (>= 1.5)
 Scikit-learn
+scanlog (pip3 install scanlog)
 
 For  the discretization process:
 cython3
@@ -25,8 +27,10 @@ python3-h5py
 Orbkit (git clone https://github.com/orbkit/orbkit.git, beware to export ORBKITPATH)
 
 For the vizualization process:
+latex (pdflatex)
 pylatex (pip3 install pylatex)
-PIL
+PIL or on conda pillow
+Matplotlib (>3.1)
 Mayavi (pip3 install : beware of pyface install ! problem with Qt4, Qt5 in profile : export QT_API=pyqt, export ETS_TOOLKIT=qt4)
 
 User installation
